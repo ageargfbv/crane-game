@@ -55,7 +55,7 @@ select{font-size:16px;border:1px solid var(--line);border-radius:8px;padding:6px
 <header>
   <div class="l">残り<b id="left">10</b>獲得<b id="got">0</b></div>
   <h1>橋わたし</h1>
-  <div class="r"><button class="icon" id="gear">⚙</button></div>
+  <div class="r"><button class="icon" id="home">初期位置</button> <button class="icon" id="gear">⚙</button></div>
 </header>
 <div id="stage">
   <div id="load">…</div>
@@ -86,6 +86,8 @@ select{font-size:16px;border:1px solid var(--line);border-radius:8px;padding:6px
   <div class="row"><label for="p_gap">間隔</label><input type="range" id="p_gap" min="60" max="260" step="5"><output></output></div>
   <div class="row"><label for="p_br">太さ</label><input type="range" id="p_br" min="6" max="25" step="1"><output></output></div>
   <div class="row"><label for="p_bfr">バーのすべり</label><input type="range" id="p_bfr" min="0.05" max="1.2" step="0.05"><output></output></div>
+  <div class="row"><label for="p_gfront">手前のバー</label><input type="range" id="p_gfront" min="30" max="150" step="5"><output></output></div>
+  <div class="row"><label for="p_gback">奥の枠</label><input type="range" id="p_gback" min="10" max="120" step="5"><output></output></div>
   <div class="acts">
     <button id="reset" class="pri">台を戻す</button>
     <button id="plus">＋10回</button>
@@ -98,13 +100,13 @@ import * as THREE from "./lib/three.module.min.js";
 import RAPIER from "./lib/rapier.es.js";
 
 // ---------------------------------------------------------------- 設定（長さ mm・重さ g で持つ）
-const KEY = "crane-game-v2";
-const DEF = { grip: 0.35, topkeep: 0.3, open: 8, push: 10, speed: 0.08,
-  bw: 110, bd: 200, bh: 90, bm: 350, bf: 0.45, place: 1, gap: 130, br: 12, bfr: 0.55 };
+const KEY = "crane-game-v3";
+const DEF = { grip: 0.2, topkeep: 0.3, open: 8, push: 10, speed: 0.08,
+  bw: 120, bd: 160, bh: 170, bm: 400, bf: 0.45, place: 1, gap: 125, br: 14, bfr: 0.9, gfront: 60, gback: 35 };
 const FMT = { grip: v => "×" + (+v).toFixed(2), topkeep: v => Math.round(v * 100) + "%", open: v => v + "°",
   push: v => v + "mm", speed: v => Math.round(v * 1000) + "mm/s", bw: v => v + "mm", bd: v => v + "mm",
   bh: v => v + "mm", bm: v => v + "g", bf: v => (+v).toFixed(2), place: () => "", gap: v => v + "mm",
-  br: v => v + "mm", bfr: v => (+v).toFixed(2) };
+  br: v => v + "mm", bfr: v => (+v).toFixed(2), gfront: v => v + "mm", gback: v => v + "mm" };
 let store = {};
 try { store = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { store = {}; }
 const P = Object.assign({}, DEF, store.p || {});
@@ -113,11 +115,11 @@ function persist() { try { localStorage.setItem(KEY, JSON.stringify({ p: P, left
 
 // ---------------------------------------------------------------- 寸法（m）
 const BAR_Y = 0.30, BAR_LEN = 0.56;
-const HOME = { x: -0.20, z: 0.17 };
-const LIM = { x: [-0.22, 0.22], z: [-0.20, 0.20] };
-const TOP_Y = 0.64;
+const HOME = { x: -0.23, z: 0.25 };   // 手前のバーより前＝取り出し口の上
+const LIM = { x: [-0.23, 0.23], z: [-0.20, 0.25] };
+const TOP_Y = 0.80;                  // 高さ200mmの箱の上を爪先が通れる高さ
 const HINGE = 0.030;                 // 付け根の左右のずれ
-const H_LEN = 0.070, V_LEN = 0.150;  // コの字の横と縦
+const H_LEN = 0.060, V_LEN = 0.210;  // コの字の横と縦（長い透明のアーム）
 const TIP_L = 0.016;                 // 爪先（内向き）
 const TIP_SLOPE = 0.55;              // 爪先の反り（rad）。重みが爪を開く向きにかかる
 const DOWN_V = 0.09, UP_V = 0.08, BACK_V = 0.12;
@@ -135,14 +137,14 @@ scene.background = new THREE.Color(0xdfe3ea);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 10);
 // まえ: ←→ が左右（x）／ よこ: 左から見て ←→ が奥と手前（z）
 const VIEWS = [
-  { name: "まえ", pos: [0, 0.66, 0.78], at: [0, 0.34, -0.02], axis: "x", sign: 1 },
-  { name: "よこ", pos: [-0.80, 0.64, 0.02], at: [0, 0.34, 0], axis: "z", sign: 1 },
+  { name: "まえ", pos: [0, 0.74, 0.86], at: [0, 0.40, -0.02], axis: "x", sign: 1 },
+  { name: "よこ", pos: [-0.88, 0.72, 0.02], at: [0, 0.40, 0], axis: "z", sign: 1 },
 ];
 let viewIdx = 0;
-const nets = [];
+const nets = [], nearSide = [];
 function setView(i) {
   viewIdx = i; const v = VIEWS[i];
-  if (nets[0]) nets[0].visible = v.axis !== "z";   // よこ から見るときは手前の網を消す
+  for (const m of [nets[0], ...nearSide]) if (m) m.visible = v.axis !== "z";   // よこ から見るときは手前の網と枠を消す
   camera.position.set(...v.pos); camera.lookAt(...v.at);
   document.getElementById("cam").textContent = v.name;
 }
@@ -192,10 +194,13 @@ const M = {
   sign: new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.7 }),
   bar: new THREE.MeshStandardMaterial({ color: 0xdfe3ea, metalness: 0.85, roughness: 0.22 }),
   post: new THREE.MeshStandardMaterial({ color: 0xaab1bd, metalness: 0.5, roughness: 0.4 }),
-  claw: new THREE.MeshStandardMaterial({ color: 0xd61f26, metalness: 0.25, roughness: 0.4 }),
+  claw: new THREE.MeshStandardMaterial({ color: 0xdcecff, metalness: 0.1, roughness: 0.15, transparent: true, opacity: 0.55 }),
+  rubber: new THREE.MeshStandardMaterial({ color: 0xf2a7c3, roughness: 0.7 }),
+  frame: new THREE.MeshStandardMaterial({ color: 0xf7f8fa, roughness: 0.6 }),
+  acryl: new THREE.MeshStandardMaterial({ color: 0xe8f4ff, roughness: 0.05, transparent: true, opacity: 0.18, depthWrite: false }),
   tip: new THREE.MeshStandardMaterial({ color: 0xcfd4dc, metalness: 0.8, roughness: 0.3 }),
-  head: new THREE.MeshStandardMaterial({ color: 0xc8cdd5, metalness: 0.85, roughness: 0.25 }),
-  headTop: new THREE.MeshStandardMaterial({ color: 0xe3262d, roughness: 0.5 }),
+  head: new THREE.MeshStandardMaterial({ color: 0xf2f3f5, metalness: 0.2, roughness: 0.35 }),
+  headTop: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }),
   net: new THREE.MeshStandardMaterial({ map: netTex, transparent: true, side: THREE.DoubleSide, metalness: 0.5, roughness: 0.5 }),
   box: new THREE.MeshStandardMaterial({ map: boxTex, roughness: 0.55 }),
 };
@@ -220,41 +225,59 @@ function staticBox(hx, hy, hz, x, y, z, mat) {
   if (mat) { const m = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, hy * 2, hz * 2), mat); m.position.set(x, y, z); m.receiveShadow = true; scene.add(m); }
 }
 staticBox(0.40, 0.01, 0.40, 0, -0.01, 0, M.chute);
-staticBox(0.40, 0.42, 0.01, 0, 0.41, -0.33, M.wall);
-staticBox(0.01, 0.42, 0.40, -0.33, 0.41, 0, null);
-staticBox(0.01, 0.42, 0.40, 0.33, 0.41, 0, null);
-staticBox(0.40, 0.42, 0.01, 0, 0.41, 0.33, null);
-staticBox(0.33, 0.01, 0.05, 0, BAR_Y + 0.02, -0.27, M.shelf);   // 奥の白い棚
+staticBox(0.40, 0.47, 0.01, 0, 0.46, -0.33, M.wall);
+staticBox(0.01, 0.47, 0.40, -0.37, 0.46, 0, null);
+staticBox(0.01, 0.47, 0.40, 0.37, 0.46, 0, null);
+staticBox(0.40, 0.47, 0.01, 0, 0.46, 0.33, null);
 {
-  const s = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.21), M.sign); s.position.set(0, 0.55, -0.318); scene.add(s);
-  for (const x of [-0.31, 0.31]) {  // 左右の網（見た目だけ）
+  const s = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.21), M.sign); s.position.set(0, 0.62, -0.318); scene.add(s);
+  for (const x of [-0.35, 0.35]) {  // 左右の網（見た目だけ）
     const n = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.14), M.net); n.rotation.y = Math.PI / 2; n.position.set(x, BAR_Y + 0.07, 0); scene.add(n); nets.push(n);
   }
-  const back = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.84), M.wall); back.position.set(0, 0.42, -0.319); back.receiveShadow = true; scene.add(back);
-  const side = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.84), M.wall); side.rotation.y = -Math.PI / 2; side.position.set(0.335, 0.42, 0); scene.add(side);
-  const rod = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.02, 0.02), M.post); rod.position.set(0, 0.82, 0); scene.add(rod);
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.94), M.wall); back.position.set(0, 0.47, -0.319); back.receiveShadow = true; scene.add(back);
+  const side = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.94), M.wall); side.rotation.y = -Math.PI / 2; side.position.set(0.375, 0.47, 0); scene.add(side);
+  const rod = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.02, 0.02), M.post); rod.position.set(0, 0.89, 0); scene.add(rod);
 }
 
-// バー（左右に通す2本。奥と手前に並ぶ）
+// 台: 支えのバー2本（ゴム巻き）・手前の低いバー・奥の枠・左右の枠。前後に落ちず、2本の間からだけ落ちる
 let barParts = [];
 function buildBars() {
   for (const [b, meshes] of barParts) { world.removeRigidBody(b); meshes.forEach(m => scene.remove(m)); }
-  barParts = [];
+  barParts = []; nearSide.length = 0;
   const r = P.br / 2000, gz = P.gap / 2000 + r;
-  for (const s of [-1, 1]) {
-    const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-    world.createCollider(RAPIER.ColliderDesc.cylinder(BAR_LEN / 2, r).setRotation(q(0, 0, Math.PI / 2))
-      .setTranslation(0, BAR_Y, s * gz).setFriction(P.bfr).setRestitution(0.05), body);
-    const meshes = [];
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(r, r, BAR_LEN, 24), M.bar);
-    bar.rotation.z = Math.PI / 2; bar.position.set(0, BAR_Y, s * gz); bar.castShadow = true; bar.receiveShadow = true; meshes.push(bar);
-    for (const x of [-BAR_LEN / 2 + 0.01, BAR_LEN / 2 - 0.01]) {
-      const p = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.4, r * 1.4, 0.03, 16), M.post);
-      p.rotation.z = Math.PI / 2; p.position.set(x, BAR_Y, s * gz); meshes.push(p);
-    }
-    meshes.forEach(m => scene.add(m));
-    barParts.push([body, meshes]);
+  const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  const meshes = [];
+  function rodX(rad, y, z, fr, mat) {  // 左右に通す丸い棒
+    world.createCollider(RAPIER.ColliderDesc.cylinder(BAR_LEN / 2, rad).setRotation(q(0, 0, Math.PI / 2))
+      .setTranslation(0, y, z).setFriction(fr).setRestitution(0.05), body);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, BAR_LEN, 24), mat);
+    m.rotation.z = Math.PI / 2; m.position.set(0, y, z); m.castShadow = true; m.receiveShadow = true; meshes.push(m);
   }
+  function block(hx, hy, hz, x, y, z, mat) {
+    world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(x, y, z).setFriction(0.5), body);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, hy * 2, hz * 2), mat);
+    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; meshes.push(m);
+    return m;
+  }
+  for (const sz of [-1, 1]) {
+    rodX(r, BAR_Y, sz * gz, P.bfr, M.rubber);
+    for (const x of [-BAR_LEN / 2 + 0.012, BAR_LEN / 2 - 0.012]) {   // 留め具
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.5, r * 1.5, 0.024, 16), M.post);
+      c.rotation.z = Math.PI / 2; c.position.set(x, BAR_Y, sz * gz); meshes.push(c);
+    }
+  }
+  const front = gz + P.gfront / 1000, back = -gz - P.gback / 1000;
+  rodX(0.010, BAR_Y - 0.035, front, 0.5, M.bar);                     // 手前の低いバー
+  block(BAR_LEN / 2, 0.035, 0.010, 0, BAR_Y + 0.025, back, M.frame);  // 奥の枠
+  block(BAR_LEN / 2, 0.11, 0.004, 0, BAR_Y + 0.17, back, M.acryl);    // その上の透明の板（箱が奥へ越えない）
+  for (const sx of [-1, 1]) {                                         // 左右の枠と透明の板
+    const zc = (front + back) / 2, hz = (front - back) / 2 + 0.02;
+    const f = block(0.012, 0.04, hz, sx * (BAR_LEN / 2 + 0.012), BAR_Y + 0.01, zc, M.frame);
+    const a = block(0.004, 0.10, hz, sx * (BAR_LEN / 2 + 0.012), BAR_Y + 0.15, zc, M.acryl);
+    if (sx < 0) nearSide.push(f, a);   // よこ から見るとき手前になる
+  }
+  meshes.forEach(m => scene.add(m));
+  barParts.push([body, meshes]);
 }
 
 // 箱（奥行きの向きにバーをまたぐ）
@@ -393,7 +416,10 @@ function step(dt) {
   head.setNextKinematicTranslation(hp);
   world.step();
   simTime += dt;
-  if (prize && !prize.won && prize.body.translation().y < BAR_Y - 0.12) {
+  // 獲得: バーの間から落ちた／台の外（手前のバーより前・枠の外）に出て下がった
+  const bp = prize && prize.body.translation();
+  const out = bp && (bp.z > P.gap / 2000 + P.br / 2000 + P.gfront / 1000 || Math.abs(bp.x) > BAR_LEN / 2 + 0.02) && bp.y < BAR_Y + 0.08;
+  if (prize && !prize.won && (bp.y < BAR_Y - 0.12 || out)) {
     prize.won = true; got++; persist(); ui();
     const m = document.getElementById("msg"); m.classList.add("show");
     setTimeout(() => m.classList.remove("show"), 1400);
@@ -409,7 +435,8 @@ for (const k of Object.keys(DEF)) {
   el.value = P[k]; out.textContent = FMT[k](P[k]);
   el.addEventListener("input", () => { P[k] = +el.value; out.textContent = FMT[k](P[k]); persist(); if (["grip", "open"].includes(k)) driveClaws(); });
 }
-function resetTable() { buildBars(); spawnPrize(); }
+function resetTable() { buildBars(); spawnPrize(); setView(viewIdx); }
+document.getElementById("home").onclick = () => resetTable();
 document.getElementById("gear").onclick = () => sheet.classList.toggle("open");
 document.getElementById("close").onclick = () => sheet.classList.remove("open");
 document.getElementById("reset").onclick = () => { resetTable(); sheet.classList.remove("open"); };
@@ -431,8 +458,8 @@ function frame(now) {
   while (acc >= world.timestep) { step(world.timestep); acc -= world.timestep; }
   for (const [b, m] of sync) { const p = b.translation(), r = b.rotation(); m.position.set(p.x, p.y, p.z); m.quaternion.copy(tmpQ.set(r.x, r.y, r.z, r.w)); }
   headMesh.position.set(hp.x, hp.y, hp.z);
-  carriage.position.set(hp.x, 0.80, hp.z);
-  const len = 0.80 - hp.y; rod.scale.y = Math.max(0.001, len); rod.position.set(hp.x, hp.y + len / 2, hp.z);
+  carriage.position.set(hp.x, 0.88, hp.z);
+  const len = 0.88 - hp.y; rod.scale.y = Math.max(0.001, len); rod.position.set(hp.x, hp.y + len / 2, hp.z);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -440,6 +467,7 @@ requestAnimationFrame(frame);
 
 // 試験用の取っ手（画面には出ない）
 window.__crane = { get state() { return state; }, P, get prize() { return prize && prize.body.translation(); },
+  get prizeRot() { return prize && prize.body.rotation(); },
   get claws() { return claws.map(c => { const r = c.body.rotation(); return +(2 * Math.atan2(r.z, r.w)).toFixed(3); }); },
   get head() { return { ...hp }; }, get got() { return got; }, view: setView, reset: resetTable,
   pause(v) { paused = v; },
