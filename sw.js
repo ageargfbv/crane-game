@@ -1,5 +1,5 @@
 // ネット優先、失敗したらキャッシュ。中身を変えたら CACHE の番号を上げる（新規アプリ.py push が上げる）
-const CACHE = "crane-game-v2";
+const CACHE = "crane-game-v3";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png",
   "lib/three.module.min.js", "lib/rapier.es.js"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });

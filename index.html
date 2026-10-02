@@ -71,7 +71,7 @@ select{font-size:16px;border:1px solid var(--line);border-radius:8px;padding:6px
   <h3>アーム</h3>
   <div class="row"><label for="p_grip">つかむ力</label><input type="range" id="p_grip" min="0.05" max="3" step="0.05"><output></output></div>
   <div class="row"><label for="p_topkeep">上での力</label><input type="range" id="p_topkeep" min="0" max="1" step="0.05"><output></output></div>
-  <div class="row"><label for="p_open">爪の開き</label><input type="range" id="p_open" min="0" max="30" step="1"><output></output></div>
+  <div class="row"><label for="p_open">爪の開き</label><input type="range" id="p_open" min="5" max="45" step="1"><output></output></div>
   <div class="row"><label for="p_push">押し込み</label><input type="range" id="p_push" min="0" max="30" step="1"><output></output></div>
   <div class="row"><label for="p_speed">移動の速さ</label><input type="range" id="p_speed" min="0.03" max="0.15" step="0.005"><output></output></div>
   <h3>箱</h3>
@@ -100,9 +100,9 @@ import * as THREE from "./lib/three.module.min.js";
 import RAPIER from "./lib/rapier.es.js";
 
 // ---------------------------------------------------------------- 設定（長さ mm・重さ g で持つ）
-const KEY = "crane-game-v3";
-const DEF = { grip: 0.2, topkeep: 0.3, open: 8, push: 10, speed: 0.08,
-  bw: 120, bd: 160, bh: 170, bm: 400, bf: 0.45, place: 1, gap: 125, br: 14, bfr: 0.9, gfront: 60, gback: 35 };
+const KEY = "crane-game-v4";
+const DEF = { grip: 0.2, topkeep: 0.3, open: 24, push: 10, speed: 0.08,
+  bw: 120, bd: 160, bh: 170, bm: 400, bf: 0.45, place: 1, gap: 125, br: 14, bfr: 0.9, gfront: 40, gback: 35 };
 const FMT = { grip: v => "×" + (+v).toFixed(2), topkeep: v => Math.round(v * 100) + "%", open: v => v + "°",
   push: v => v + "mm", speed: v => Math.round(v * 1000) + "mm/s", bw: v => v + "mm", bd: v => v + "mm",
   bh: v => v + "mm", bm: v => v + "g", bf: v => (+v).toFixed(2), place: () => "", gap: v => v + "mm",
@@ -118,10 +118,13 @@ const BAR_Y = 0.30, BAR_LEN = 0.56;
 const HOME = { x: -0.23, z: 0.25 };   // 手前のバーより前＝取り出し口の上
 const LIM = { x: [-0.23, 0.23], z: [-0.20, 0.25] };
 const TOP_Y = 0.80;                  // 高さ200mmの箱の上を爪先が通れる高さ
-const HINGE = 0.030;                 // 付け根の左右のずれ
-const H_LEN = 0.060, V_LEN = 0.210;  // コの字の横と縦（長い透明のアーム）
-const TIP_L = 0.016;                 // 爪先（内向き）
-const TIP_SLOPE = 0.55;              // 爪先の反り（rad）。重みが爪を開く向きにかかる
+// アーム（本人の写真: あそVIVA 阪急茨木店）: 頭の下の角から外へ下がって肘、そこから長く内へ下がる「く」の字の透明の板。
+// 閉じると黒いゴムの爪先が真ん中で合い V 字になる。座標は頭の中心から（m）。
+const HINGE = 0.07, HINGE_Y = -0.05;
+const ELBOW = [0.13, -0.06], TIP = [0.014, -0.175];   // 付け根からの肘と爪先（左右は s を掛ける）
+const ARM_D = 0.05, ARM_T = 0.012;                    // 板の奥行きと厚み
+const REACH = -HINGE_Y - TIP[1];                      // 頭の中心から爪先までの高さ
+const TIP_SLOPE = 0.5;                                // 爪先の反り。重みが爪を開く向きにかかる
 const DOWN_V = 0.09, UP_V = 0.08, BACK_V = 0.12;
 
 // ---------------------------------------------------------------- 描画
@@ -198,9 +201,10 @@ const M = {
   rubber: new THREE.MeshStandardMaterial({ color: 0xf2a7c3, roughness: 0.7 }),
   frame: new THREE.MeshStandardMaterial({ color: 0xf7f8fa, roughness: 0.6 }),
   acryl: new THREE.MeshStandardMaterial({ color: 0xe8f4ff, roughness: 0.05, transparent: true, opacity: 0.18, depthWrite: false }),
-  tip: new THREE.MeshStandardMaterial({ color: 0xcfd4dc, metalness: 0.8, roughness: 0.3 }),
+  tip: new THREE.MeshStandardMaterial({ color: 0x3a3f48, roughness: 0.8 }),
   head: new THREE.MeshStandardMaterial({ color: 0xf2f3f5, metalness: 0.2, roughness: 0.35 }),
-  headTop: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }),
+  label: new THREE.MeshStandardMaterial({ color: 0xd8262c, roughness: 0.5 }),
+  shell: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.05, transparent: true, opacity: 0.3, depthWrite: false }),
   net: new THREE.MeshStandardMaterial({ map: netTex, transparent: true, side: THREE.DoubleSide, metalness: 0.5, roughness: 0.5 }),
   box: new THREE.MeshStandardMaterial({ map: boxTex, roughness: 0.55 }),
 };
@@ -224,18 +228,18 @@ function staticBox(hx, hy, hz, x, y, z, mat) {
   world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(x, y, z).setFriction(0.6), fixed);
   if (mat) { const m = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, hy * 2, hz * 2), mat); m.position.set(x, y, z); m.receiveShadow = true; scene.add(m); }
 }
-staticBox(0.40, 0.01, 0.40, 0, -0.01, 0, M.chute);
+staticBox(0.42, 0.01, 0.40, 0, -0.01, 0, M.chute);
 staticBox(0.40, 0.47, 0.01, 0, 0.46, -0.33, M.wall);
-staticBox(0.01, 0.47, 0.40, -0.37, 0.46, 0, null);
-staticBox(0.01, 0.47, 0.40, 0.37, 0.46, 0, null);
+staticBox(0.01, 0.47, 0.40, -0.41, 0.46, 0, null);
+staticBox(0.01, 0.47, 0.40, 0.41, 0.46, 0, null);
 staticBox(0.40, 0.47, 0.01, 0, 0.46, 0.33, null);
 {
   const s = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.21), M.sign); s.position.set(0, 0.62, -0.318); scene.add(s);
-  for (const x of [-0.35, 0.35]) {  // 左右の網（見た目だけ）
+  for (const x of [-0.39, 0.39]) {  // 左右の網（見た目だけ）
     const n = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.14), M.net); n.rotation.y = Math.PI / 2; n.position.set(x, BAR_Y + 0.07, 0); scene.add(n); nets.push(n);
   }
-  const back = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.94), M.wall); back.position.set(0, 0.47, -0.319); back.receiveShadow = true; scene.add(back);
-  const side = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.94), M.wall); side.rotation.y = -Math.PI / 2; side.position.set(0.375, 0.47, 0); scene.add(side);
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(0.84, 0.94), M.wall); back.position.set(0, 0.47, -0.319); back.receiveShadow = true; scene.add(back);
+  const side = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.94), M.wall); side.rotation.y = -Math.PI / 2; side.position.set(0.415, 0.47, 0); scene.add(side);
   const rod = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.02, 0.02), M.post); rod.position.set(0, 0.89, 0); scene.add(rod);
 }
 
@@ -267,7 +271,7 @@ function buildBars() {
     }
   }
   const front = gz + P.gfront / 1000, back = -gz - P.gback / 1000;
-  rodX(0.010, BAR_Y - 0.035, front, 0.5, M.bar);                     // 手前の低いバー
+  rodX(0.010, BAR_Y + 0.005, front, 0.5, M.bar);                     // 手前のバー（倒れた箱がもたれて止まる高さ）
   block(BAR_LEN / 2, 0.035, 0.010, 0, BAR_Y + 0.025, back, M.frame);  // 奥の枠
   block(BAR_LEN / 2, 0.11, 0.004, 0, BAR_Y + 0.17, back, M.acryl);    // その上の透明の板（箱が奥へ越えない）
   for (const sx of [-1, 1]) {                                         // 左右の枠と透明の板
@@ -297,38 +301,53 @@ function spawnPrize() {
   prize = { body, mesh, pair, won: false };
 }
 
-// アーム: 頭（位置で動かす）＋コの字の爪2本（ばね付きの蝶番・z軸まわり）
+// アーム: 頭（位置で動かす・横長のカプセル）＋「く」の字の爪2本（ばね付きの蝶番・z軸まわり）
 const head = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setCanSleep(false).setTranslation(HOME.x, TOP_Y, HOME.z));
-world.createCollider(RAPIER.ColliderDesc.cylinder(0.012, 0.045).setCollisionGroups(HEAD_GROUPS), head);
+const headCol = world.createCollider(RAPIER.ColliderDesc.cuboid(0.12, 0.05, 0.065).setCollisionGroups(HEAD_GROUPS), head);
 const headMesh = new THREE.Group();
 {
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.024, 40), M.head); disc.castShadow = true; headMesh.add(disc);
-  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.026, 40), M.headTop); headMesh.add(top);
+  const sh = new THREE.Shape(), w = 0.11, h = 0.045, rr = 0.04;
+  sh.moveTo(-w + rr, -h); sh.lineTo(w - rr, -h); sh.quadraticCurveTo(w, -h, w, -h + rr); sh.lineTo(w, h - rr);
+  sh.quadraticCurveTo(w, h, w - rr, h); sh.lineTo(-w + rr, h); sh.quadraticCurveTo(-w, h, -w, h - rr); sh.lineTo(-w, -h + rr);
+  sh.quadraticCurveTo(-w, -h, -w + rr, -h);
+  const body = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 0.11, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.012 }), M.head);
+  body.position.z = -0.055; body.castShadow = true; headMesh.add(body);
+  const lab = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.05, 0.002), M.label); lab.position.z = 0.069; headMesh.add(lab);
+  const shell = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 0.13, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02 }), M.shell);
+  shell.scale.set(1.06, 1.08, 1); shell.position.z = -0.065; headMesh.add(shell);
 }
 scene.add(headMesh);
-const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 1, 16), M.head); scene.add(rod);
+const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 1, 16), M.post); scene.add(rod);
 const carriage = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.03, 0.07), M.post); scene.add(carriage);
 
 const claws = [];
 for (const s of [-1, 1]) {   // s=-1 左の爪, +1 右の爪
   const hp0 = head.translation();
-  const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(hp0.x + s * HINGE, hp0.y - 0.012, hp0.z)
+  const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(hp0.x + s * HINGE, hp0.y + HINGE_Y, hp0.z)
     .setCcdEnabled(true).setCanSleep(false).setAngularDamping(2).setLinearDamping(0.5));
-  const parts = [
-    { he: [H_LEN / 2, 0.005, 0.011], at: [s * H_LEN / 2, 0, 0], rz: 0, mat: M.claw },
-    { he: [0.005, V_LEN / 2, 0.011], at: [s * H_LEN, -V_LEN / 2, 0], rz: 0, mat: M.claw },
-    { he: [TIP_L / 2, 0.004, 0.011], at: [s * (H_LEN - TIP_L / 2 + 0.004), -V_LEN + 0.004, 0], rz: s * TIP_SLOPE, mat: M.tip, fr: 0.25 },
-  ];
+  const pts = [[0, 0], [s * (ELBOW[0] - HINGE), ELBOW[1]], [s * (TIP[0] - HINGE), TIP[1]]];
   const g = new THREE.Group(), cols = [];
-  for (const pt of parts) {
-    cols.push(world.createCollider(RAPIER.ColliderDesc.cuboid(...pt.he).setTranslation(...pt.at).setRotation(q(0, 0, pt.rz))
-      .setDensity(2200).setFriction(pt.fr ?? 0.6).setCollisionGroups(CLAW_GROUPS), body));
-    const m = new THREE.Mesh(new THREE.BoxGeometry(pt.he[0] * 2, pt.he[1] * 2, pt.he[2] * 2), pt.mat);
-    m.position.set(...pt.at); m.rotation.z = pt.rz; m.castShadow = true; g.add(m);
+  for (let i = 0; i < 2; i++) {          // 肘までと、肘から爪先まで
+    const [a, b] = [pts[i], pts[i + 1]];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+    cols.push(world.createCollider(RAPIER.ColliderDesc.cuboid(len / 2, ARM_T / 2, ARM_D / 2).setTranslation(mx, my, 0)
+      .setRotation(q(0, 0, ang)).setDensity(1200).setFriction(0.3).setCollisionGroups(CLAW_GROUPS), body));
+    for (const z of [-ARM_D / 2, ARM_D / 2]) {   // 板の前と後ろの縁
+      const m = new THREE.Mesh(new THREE.BoxGeometry(len + ARM_T, ARM_T, 0.006), M.claw);
+      m.position.set(mx, my, z); m.rotation.z = ang; g.add(m);
+    }
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(len, ARM_T * 0.6, ARM_D), M.claw);
+    plate.position.set(mx, my, 0); plate.rotation.z = ang; plate.castShadow = true; g.add(plate);
   }
-  const jd = RAPIER.JointData.revolute({ x: s * HINGE, y: -0.012, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
+  const tp = [pts[2][0] - s * 0.006, pts[2][1]];   // 黒いゴムの爪先（内向きに反る）
+  cols.push(world.createCollider(RAPIER.ColliderDesc.cuboid(0.013, 0.006, ARM_D * 0.35).setTranslation(tp[0], tp[1], 0)
+    .setRotation(q(0, 0, s * TIP_SLOPE)).setDensity(1200).setFriction(0.5).setCollisionGroups(CLAW_GROUPS), body));
+  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.012, ARM_D * 0.7), M.tip);
+  tip.position.set(tp[0], tp[1], 0); tip.rotation.z = s * TIP_SLOPE; tip.castShadow = true; g.add(tip);
+  const jd = RAPIER.JointData.revolute({ x: s * HINGE, y: HINGE_Y, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
   jd.limitsEnabled = true;
-  jd.limits = s < 0 ? [-0.6, 0.95] : [-0.95, 0.6];
+  jd.limits = s < 0 ? [-0.9, 0.4] : [-0.4, 0.9];
   const joint = world.createImpulseJoint(jd, head, body, true);
   joint.setContactsEnabled(false);
   joint.configureMotorModel(RAPIER.MotorModel.ForceBased);
@@ -341,13 +360,13 @@ function driveClaws() {
   const open = clawTarget === "open";
   const k = 1.2 * P.grip * gripScale, d = 0.04 + 0.04 * P.grip;
   for (const c of claws) {
-    const target = open ? c.s * (P.open * Math.PI / 180) : -c.s * 0.80;   // 閉じきる先を狙って押し続ける
+    const target = open ? c.s * (P.open * Math.PI / 180) : -c.s * 0.25;   // 爪先が真ん中を越える先を狙って押し続ける
     c.joint.configureMotorPosition(target, open ? 3 : k, open ? 0.2 : d);
   }
 }
-function clawTouching() {
+function clawTouching() {   // 爪か頭が何かに触れたか（本物は景品に触れるとワイヤーが緩んで止まる）
   let hit = false;
-  for (const c of claws) for (const col of c.colliders) {
+  for (const col of [headCol, ...claws.flatMap(c => c.colliders)]) {
     world.contactPairsWith(col, other => { if (!hit) world.contactPair(col, other, m => { if (m.numContacts() > 0) hit = true; }); });
   }
   return hit;
@@ -395,7 +414,7 @@ function step(dt) {
       const dy = DOWN_V * dt;
       hp.y -= dy;
       if (pushLeft >= 0) pushLeft -= dy;
-      if (hp.y <= 0.04 + V_LEN || (pushLeft !== -1 && pushLeft <= 0)) { state = "close"; t0 = simTime; clawTarget = "close"; gripScale = 1; driveClaws(); }
+      if (hp.y <= 0.04 + REACH || (pushLeft !== -1 && pushLeft <= 0)) { state = "close"; t0 = simTime; clawTarget = "close"; gripScale = 1; driveClaws(); }
       break;
     }
     case "close": if (simTime - t0 > 0.8) { state = "up"; t0 = simTime; } break;
@@ -416,10 +435,9 @@ function step(dt) {
   head.setNextKinematicTranslation(hp);
   world.step();
   simTime += dt;
-  // 獲得: バーの間から落ちた／台の外（手前のバーより前・枠の外）に出て下がった
+  // 獲得: 下まで落ちた（2本の間から、または運んで取り出し口へ）。手前のバーにもたれただけでは数えない
   const bp = prize && prize.body.translation();
-  const out = bp && (bp.z > P.gap / 2000 + P.br / 2000 + P.gfront / 1000 || Math.abs(bp.x) > BAR_LEN / 2 + 0.02) && bp.y < BAR_Y + 0.08;
-  if (prize && !prize.won && (bp.y < BAR_Y - 0.12 || out)) {
+  if (prize && !prize.won && bp.y < BAR_Y - 0.12) {
     prize.won = true; got++; persist(); ui();
     const m = document.getElementById("msg"); m.classList.add("show");
     setTimeout(() => m.classList.remove("show"), 1400);
