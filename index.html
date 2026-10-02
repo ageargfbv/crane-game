@@ -71,7 +71,7 @@ select{font-size:16px;border:1px solid var(--line);border-radius:8px;padding:6px
   <h3>アーム</h3>
   <div class="row"><label for="p_grip">つかむ力</label><input type="range" id="p_grip" min="0.05" max="3" step="0.05"><output></output></div>
   <div class="row"><label for="p_topkeep">上での力</label><input type="range" id="p_topkeep" min="0" max="1" step="0.05"><output></output></div>
-  <div class="row"><label for="p_open">爪の開き</label><input type="range" id="p_open" min="5" max="45" step="1"><output></output></div>
+  <div class="row"><label for="p_open">爪の開き</label><input type="range" id="p_open" min="10" max="70" step="1"><output></output></div>
   <div class="row"><label for="p_push">押し込み</label><input type="range" id="p_push" min="0" max="30" step="1"><output></output></div>
   <div class="row"><label for="p_speed">移動の速さ</label><input type="range" id="p_speed" min="0.03" max="0.15" step="0.005"><output></output></div>
   <h3>箱</h3>
@@ -100,8 +100,8 @@ import * as THREE from "./lib/three.module.min.js";
 import RAPIER from "./lib/rapier.es.js";
 
 // ---------------------------------------------------------------- 設定（長さ mm・重さ g で持つ）
-const KEY = "crane-game-v4";
-const DEF = { grip: 0.2, topkeep: 0.3, open: 24, push: 10, speed: 0.08,
+const KEY = "crane-game-v5";
+const DEF = { grip: 0.2, topkeep: 0.3, open: 50, push: 10, speed: 0.08,
   bw: 120, bd: 160, bh: 170, bm: 400, bf: 0.45, place: 1, gap: 125, br: 14, bfr: 0.9, gfront: 40, gback: 35 };
 const FMT = { grip: v => "×" + (+v).toFixed(2), topkeep: v => Math.round(v * 100) + "%", open: v => v + "°",
   push: v => v + "mm", speed: v => Math.round(v * 1000) + "mm/s", bw: v => v + "mm", bd: v => v + "mm",
@@ -347,7 +347,7 @@ for (const s of [-1, 1]) {   // s=-1 左の爪, +1 右の爪
   tip.position.set(tp[0], tp[1], 0); tip.rotation.z = s * TIP_SLOPE; tip.castShadow = true; g.add(tip);
   const jd = RAPIER.JointData.revolute({ x: s * HINGE, y: HINGE_Y, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
   jd.limitsEnabled = true;
-  jd.limits = s < 0 ? [-0.9, 0.4] : [-0.4, 0.9];
+  jd.limits = s < 0 ? [-1.25, 0.4] : [-0.4, 1.25];   // 開きは70°まで
   const joint = world.createImpulseJoint(jd, head, body, true);
   joint.setContactsEnabled(false);
   joint.configureMotorModel(RAPIER.MotorModel.ForceBased);
